@@ -237,22 +237,33 @@
    1. 地図画像の設定
 ================================================================== */
 const MAP_IMAGE = 'zoo-map.svg';
-const IMG_W = 1600, IMG_H = 1300;
+const IMG_W = 1600, IMG_H = 1200;
 
 /* ==================================================================
    2. GPSキャリブレーション（※実測値に置き換えてください）
 
    自作マップと実際の緯度経度を対応づけるための基準点です。
-   できるだけ離れた2地点を選び、
+   地図は公式マップに合わせて真北が上ではないため、
+   一直線に並ばない3地点を使ったアフィン変換で換算します。
      ・現地でスマホの地図アプリ等から緯度経度を取得する
      ・その地点が地図画像上のどのピクセル位置(x, y)かを測る
    という手順で調べ、下の値を置き換えてください。
-   （下の緯度経度はあくまで仮の値です）
+   （x, y は3つの門の位置。緯度経度はあくまで仮の値です）
 ================================================================== */
 const CALIBRATION = [
-  { id:'main-gate',      lat:35.71700, lng:139.77160, x:1523, y:521 },
-  { id:'ikenohata-gate', lat:35.71560, lng:139.76830, x:101,  y:977 }
+  { id:'main-gate',      lat:35.71700, lng:139.77160, x:1209, y:936  },
+  { id:'benten-gate',    lat:35.71300, lng:139.77020, x:354,  y:1092 },
+  { id:'ikenohata-gate', lat:35.71560, lng:139.76830, x:196,  y:278  }
 ];
+
+/* 園外の判定
+   動物園の中心（概略）からの実際の距離で判定するため、上の基準点が仮の値でも働く。
+     地図の範囲内           … 現在地マーカーと最寄りエリアを表示
+     範囲外で FAR_M 以内    … 地図は動かさず、最寄りの門までの距離を表示
+     FAR_M より遠い         … 距離だけ表示し、電池節約のため位置の監視を止める
+   最寄りの門までの距離は CALIBRATION のうち門の緯度経度を使う。 */
+const ZOO_CENTER = { lat:35.7164, lng:139.7714 };
+const FAR_M = 2000;
 
 /* ==================================================================
    3. エリアと動物のデータ
@@ -263,32 +274,51 @@ const CALIBRATION = [
 ================================================================== */
 const AREAS = [
   /* ------------------------- 東園 ------------------------- */
-  { id:'main-gate', x:1523, y:521, tier:1, theme:'gate', zone:'east',
+  { id:'main-gate', x:1209, y:936, tier:1, theme:'gate', zone:'east',
     ja:'正門', en:'Main Gate', animals:[],
-    noteJa:'JR上野駅（公園口）から徒歩約5分。もっとも利用者の多い入口です。',
-    noteEn:'About a five-minute walk from JR Ueno Station (Park Exit). The busiest entrance.' },
+    noteJa:'JR上野駅（公園口）から徒歩約5分。東園の南端にある、もっとも利用者の多い入口です。',
+    noteEn:'About a five-minute walk from JR Ueno Station (Park Exit). The busiest entrance, at the south end of the East Garden.' },
 
-  { id:'monkey-hill', x:1376, y:444, tier:2, theme:'rock', zone:'east',
-    ja:'サル山', en:'Monkey Mountain',
-    animals:[{ja:'ニホンザル', en:'Japanese macaque'}],
-    noteJa:'1931年に完成した、日本の動物園で最初期の無柵放養式展示のひとつです。',
-    noteEn:'Completed in 1931, one of the earliest barless enclosures at any Japanese zoo.' },
+  { id:'japanese-birds-1', x:1092, y:838, tier:3, theme:'forest', zone:'east',
+    ja:'日本の鳥 I', en:'Birds of Japan I',
+    animals:[{ja:'日本の野鳥', en:'Japanese wild birds'}],
+    noteJa:'正門を入ってすぐ左手にある、日本の鳥の展示です。',
+    noteEn:'An exhibit of Japanese birds just to the left inside the Main Gate.' },
 
-  { id:'elephant-forest', x:1180, y:316, tier:1, theme:'savanna', zone:'east',
+  { id:'japanese-animals', x:991, y:796, tier:2, theme:'forest', zone:'east',
+    ja:'日本の動物', en:'Japanese Animals',
+    animals:[{ja:'ニホンカモシカ', en:'Japanese serow'}],
+    noteJa:'東園の南西の張り出しにあるエリアです。ニホンカモシカは一時的に展示を中止しています。',
+    noteEn:'In the south-western lobe of the East Garden. The Japanese serow is temporarily off display.' },
+
+  { id:'japanese-birds-2', x:991, y:620, tier:3, theme:'forest', zone:'east',
+    ja:'日本の鳥 II', en:'Birds of Japan II',
+    animals:[{ja:'日本の野鳥', en:'Japanese wild birds'}],
+    noteJa:'バイソン・プレーリードッグの展示の南にある、日本の鳥の展示です。',
+    noteEn:'An exhibit of Japanese birds just south of the bison and prairie dogs.' },
+
+  { id:'prairie-bison', x:1027, y:549, tier:2, theme:'savanna', zone:'east',
+    ja:'バイソン・プレーリードッグ', en:'Bison & Prairie Dogs',
+    animals:[
+      {ja:'アメリカバイソン',       en:'American bison'},
+      {ja:'オグロプレーリードッグ', en:'Black-tailed prairie dog'},
+      {ja:'リス',                   en:'Squirrel'}],
+    noteJa:'北米の草原の動物を中心にした展示です。',
+    noteEn:'Centred on animals of the North American prairie.' },
+
+  { id:'world-monkeys', x:1092, y:481, tier:3, theme:'rock', zone:'east',
+    ja:'世界のサル', en:'Monkeys of the World',
+    animals:[{ja:'アビシニアコロブス', en:'Mantled guereza'}],
+    noteJa:'ゾウのすむ森の西どなりで、世界各地のサルの仲間を展示しています。',
+    noteEn:'Next to the Forest of Elephants, showing primates from around the world.' },
+
+  { id:'elephant-forest', x:1126, y:441, tier:1, theme:'savanna', zone:'east',
     ja:'ゾウのすむ森', en:'Forest of Elephants',
     animals:[{ja:'アジアゾウ', en:'Asian elephant'}],
-    noteJa:'土と緑の広い放飼場で、群れでの飼育に対応した施設です。',
-    noteEn:'A spacious naturalistic yard designed to house elephants as a herd.' },
+    noteJa:'東園の中央にある、群れでの飼育に対応した広い放飼場です。',
+    noteEn:'A spacious yard in the middle of the East Garden, designed to house elephants as a herd.' },
 
-  { id:'gorilla-tiger', x:1004, y:490, tier:1, theme:'forest', zone:'east',
-    ja:'ゴリラ・トラのすむ森', en:'Gorilla & Tiger Forest',
-    animals:[
-      {ja:'ニシローランドゴリラ', en:'Western lowland gorilla'},
-      {ja:'スマトラトラ',        en:'Sumatran tiger'}],
-    noteJa:'アフリカの森と亜熱帯の林を再現したエリア。トラには泳げる水場があります。',
-    noteEn:'Recreates an African forest and a subtropical woodland. The tigers have a pool to swim in.' },
-
-  { id:'bear-hill', x:1204, y:636, tier:2, theme:'rock', zone:'east',
+  { id:'bear-hill', x:1212, y:418, tier:1, theme:'rock', zone:'east',
     ja:'クマたちの丘', en:'Bear Hill',
     animals:[
       {ja:'ツキノワグマ', en:'Asiatic black bear'},
@@ -296,172 +326,165 @@ const AREAS = [
     noteJa:'岩場と樹木を組み合わせた、斜面を生かした展示場です。',
     noteEn:'A hillside exhibit combining rock faces and trees.' },
 
-  { id:'polar-sea', x:1390, y:764, tier:1, theme:'water', zone:'east',
+  { id:'cranes', x:1208, y:351, tier:3, theme:'savanna', zone:'east',
+    ja:'ツル・クロトキ', en:'Cranes & Black-headed Ibis',
+    animals:[
+      {ja:'タンチョウ', en:'Red-crowned crane'},
+      {ja:'クロトキ',   en:'Black-headed ibis'}],
+    noteJa:'クマたちの丘の北側に並ぶ、水辺の鳥の展示です。',
+    noteEn:'Waterbird exhibits lined up just north of Bear Hill.' },
+
+  { id:'polar-sea', x:1058, y:302, tier:1, theme:'water', zone:'east',
     ja:'ホッキョクグマとアザラシの海', en:'Polar Bear & Seal Sea',
     animals:[
-      {ja:'ホッキョクグマ',         en:'Polar bear'},
-      {ja:'ゼニガタアザラシ',       en:'Harbour seal'},
-      {ja:'スバールバルライチョウ', en:'Svalbard rock ptarmigan'}],
-    noteJa:'大きな水槽ごしに、泳ぐホッキョクグマを間近で見られます。',
-    noteEn:'Large viewing pools let you watch the polar bear swim up close.' },
+      {ja:'ホッキョクグマ',   en:'Polar bear'},
+      {ja:'ゼニガタアザラシ', en:'Harbour seal'}],
+    noteJa:'東園の北西部。大きな水槽ごしに、泳ぐホッキョクグマを間近で見られます。',
+    noteEn:'In the north-west of the East Garden. Large viewing pools let you watch the polar bear swim up close.' },
 
-  { id:'prairie-monkey', x:1252, y:490, tier:3, theme:'savanna', zone:'east',
-    ja:'プレーリー・世界のサル', en:'Prairie & World Monkeys',
+  { id:'nocturnal', x:1290, y:305, tier:2, theme:'indoor', zone:'east',
+    ja:'夜の森', en:'Nocturnal Forest',
     animals:[
-      {ja:'オグロプレーリードッグ', en:'Black-tailed prairie dog'},
-      {ja:'アメリカバイソン',       en:'American bison'},
-      {ja:'ワオキツネザル',         en:'Ring-tailed lemur'}],
-    noteJa:'北米の草原の動物と、世界各地のサルの仲間を並べて展示しています。',
-    noteEn:'North American prairie species shown alongside primates from around the world.' },
-
-  { id:'nocturnal-tapir', x:1050, y:716, tier:3, theme:'indoor', zone:'east',
-    ja:'夜の森・バク', en:'Nocturnal House & Tapir',
-    animals:[
-      {ja:'スンダスローロリス',           en:'Sunda slow loris'},
       {ja:'アメリカバク',                 en:'Brazilian tapir'},
-      {ja:'デマレルーセットオオコウモリ', en:'Egyptian fruit bat'}],
-    noteJa:'昼夜を逆転させた照明で、夜行性動物が活動する姿を観察できます。',
-    noteEn:'Reversed lighting lets you watch nocturnal animals while they are active.' },
+      {ja:'デマレルーセットオオコウモリ', en:'Egyptian fruit bat'},
+      {ja:'スンダスローロリス',           en:'Sunda slow loris'}],
+    noteJa:'昼夜を逆転させた照明で、夜行性動物が活動する姿を観察できます。屋外にはバクの放飼場があります。',
+    noteEn:'Reversed lighting lets you watch nocturnal animals while they are active. The tapirs have an outdoor yard.' },
 
-  { id:'japanese-animals', x:1318, y:160, tier:2, theme:'forest', zone:'east',
-    ja:'日本の動物', en:'Japanese Animals',
+  { id:'gorilla-tiger', x:1410, y:247, tier:1, theme:'forest', zone:'east',
+    ja:'ゴリラ・トラのすむ森', en:'Gorilla & Tiger Forest',
     animals:[
-      {ja:'ニホンカモシカ', en:'Japanese serow'},
-      {ja:'エゾシカ',       en:'Ezo sika deer'},
-      {ja:'ニホンリス',     en:'Japanese squirrel'},
-      {ja:'ツシマヤマネコ', en:'Tsushima leopard cat'}],
-    noteJa:'日本各地に生息する在来種を集めたエリアです。',
-    noteEn:'Native species from across the Japanese archipelago.' },
+      {ja:'ニシローランドゴリラ', en:'Western lowland gorilla'},
+      {ja:'スマトラトラ',         en:'Sumatran tiger'},
+      {ja:'テナガザル',           en:'Gibbon'}],
+    noteJa:'東園の北東の奥。アフリカの森と亜熱帯の林を再現したエリアです。',
+    noteEn:'At the far north-east of the East Garden, recreating an African forest and a subtropical woodland.' },
 
-  { id:'pagoda', x:1071, y:135, tier:3, theme:'landmark', zone:'east',
-    ja:'旧寛永寺五重塔', en:'Former Kan\'ei-ji Pagoda', animals:[],
-    noteJa:'国の重要文化財。動物園の敷地内に建っています。',
-    noteEn:'A nationally designated Important Cultural Property standing inside the zoo grounds.' },
-
-  { id:'cranes', x:916, y:194, tier:3, theme:'savanna', zone:'east',
-    ja:'ツル・ヘビクイワシ・トキ', en:'Cranes, Secretarybird & Ibis',
+  { id:'east-edge-birds', x:1431, y:522, tier:2, theme:'savanna', zone:'east',
+    ja:'キジ・カワウソ・フクロウ・ワシタカ', en:'Pheasants, Otter, Owls & Raptors',
     animals:[
-      {ja:'タンチョウ',   en:'Red-crowned crane'},
-      {ja:'ヘビクイワシ', en:'Secretarybird'},
-      {ja:'トキ',         en:'Japanese crested ibis'}],
-    noteJa:'国内外の大型の鳥を、開けた放飼場で展示しています。',
-    noteEn:'Large birds from Japan and abroad, shown in open-air enclosures.' },
-
-  { id:'bird-house', x:1452, y:238, tier:3, theme:'indoor', zone:'east',
-    ja:'バードハウス', en:'Bird House',
-    animals:[
-      {ja:'ミナミコアリクイ', en:'Southern tamandua'},
-      {ja:'アオメキバタン',   en:'Blue-eyed cockatoo'},
-      {ja:'アオバズク',       en:'Brown hawk-owl'}],
-    noteJa:'屋内で世界各地の鳥を中心に展示しています。',
-    noteEn:'An indoor hall centred on birds from around the world.' },
-
-  { id:'bird-cage', x:1494, y:320, tier:3, theme:'savanna', zone:'east',
-    ja:'バードケージ', en:'Bird Cage',
-    animals:[
-      {ja:'パラワンコクジャク',   en:'Palawan peacock-pheasant'},
-      {ja:'カンムリコサイチョウ', en:'African pied hornbill'}],
-    noteJa:'高さのある大型ケージで、飛翔のようすを観察できます。',
-    noteEn:'A tall aviary where you can watch the birds in flight.' },
-
-  { id:'pheasant-otter', x:894, y:792, tier:3, theme:'savanna', zone:'east',
-    ja:'キジ類・カワウソ・猛禽類', en:'Pheasants, Otter & Birds of Prey',
-    animals:[
+      {ja:'キジ',           en:'Pheasant'},
       {ja:'ユーラシアカワウソ', en:'Eurasian otter'},
-      {ja:'コンドル',           en:'Andean condor'},
-      {ja:'ニホンキジ',         en:'Green pheasant'}],
-    noteJa:'東園の外周沿いにあり、見落としやすい静かなエリアです。',
-    noteEn:'A quiet corner along the East Garden\u2019s outer path — easy to miss.' },
+      {ja:'シロフクロウ',   en:'Snowy owl'},
+      {ja:'ワシ・タカの仲間', en:'Eagles & hawks'}],
+    noteJa:'東園の東の縁に沿って並ぶ小さな展示です。',
+    noteEn:'A row of small exhibits along the eastern edge of the East Garden.' },
+
+  { id:'kankantei', x:1529, y:416, tier:3, theme:'landmark', zone:'east',
+    ja:'閑々亭', en:'Kankantei Teahouse', animals:[],
+    noteJa:'東園の東側に建つ茶室です。',
+    noteEn:'A traditional teahouse on the east side of the East Garden.' },
+
+  { id:'sala-thai', x:1258, y:633, tier:3, theme:'landmark', zone:'east',
+    ja:'サーラータイ', en:'Sala Thai', animals:[],
+    noteJa:'タイ風のあずまやです。',
+    noteEn:'A Thai-style pavilion.' },
+
+  { id:'old-main-gate', x:1365, y:597, tier:3, theme:'landmark', zone:'east',
+    ja:'旧正門', en:'Former Main Gate', animals:[],
+    noteJa:'かつての正門の門柱と柵が残っています。現在の出入口ではありません。',
+    noteEn:'The posts and fence of the former main gate. Not an entrance today.' },
 
   /* ------------------------- 連絡路 ------------------------- */
-  { id:'aesop-bridge', x:872, y:702, tier:2, theme:'landmark', zone:'both',
+  { id:'aesop-bridge', x:681, y:630, tier:2, theme:'landmark', zone:'both',
     ja:'いそっぷ橋', en:'Aesop Bridge', animals:[],
-    noteJa:'東園と西園をつなぐ歩道橋です。かつて走っていたモノレールは廃止されました。',
-    noteEn:'The footbridge linking the East and West Gardens. The monorail that once ran here has been discontinued.' },
+    noteJa:'動物園通りをまたいで東園と西園をつなぐ歩道橋です。西園側にカート乗り場があります。',
+    noteEn:'The footbridge over Dobutsuen-dori linking the East and West Gardens. The cart stop is on the West Garden side.' },
 
   /* ------------------------- 西園 ------------------------- */
-  { id:'panda-forest', x:604, y:552, tier:1, theme:'forest', zone:'west',
-    ja:'パンダのもり', en:'Panda Forest',
-    animals:[
-      {ja:'レッサーパンダ', en:'Red panda'},
-      {ja:'キジ類',         en:'Pheasants'}],
-    noteJa:'ジャイアントパンダのために整備されたエリアですが、2026年1月に「シャオシャオ」「レイレイ」が中国へ返還され、現在ジャイアントパンダの展示はありません。',
-    noteEn:'Built for giant pandas, but Xiao Xiao and Lei Lei were returned to China in January 2026, so no giant pandas are on display at present.' },
+  { id:'ikenohata-gate', x:196, y:278, tier:1, theme:'gate', zone:'west',
+    ja:'池之端門', en:'Ikenohata Gate', animals:[],
+    noteJa:'西園の北西、不忍通り側の入口です。東京メトロ千代田線 根津駅方面から近い入口です。',
+    noteEn:'The entrance at the north-west of the West Garden, on Shinobazu-dori, convenient from Nezu Station.' },
 
-  { id:'west-birds', x:694, y:768, tier:1, theme:'water', zone:'west',
-    ja:'西園の鳥たち', en:'Birds of the West Garden',
-    animals:[
-      {ja:'ハシビロコウ',       en:'Shoebill'},
-      {ja:'フンボルトペンギン', en:'Humboldt penguin'},
-      {ja:'ベニイロフラミンゴ', en:'American flamingo'},
-      {ja:'インカアジサシ',     en:'Inca tern'}],
-    noteJa:'動かない鳥として知られるハシビロコウがいる、西園の人気エリアです。',
-    noteEn:'Home to the famously motionless shoebill — one of the West Garden\u2019s most popular spots.' },
-
-  { id:'africa', x:310, y:700, tier:1, theme:'savanna', zone:'west',
+  { id:'africa', x:431, y:259, tier:1, theme:'savanna', zone:'west',
     ja:'アフリカの動物', en:'Animals of Africa',
     animals:[
-      {ja:'キリン',         en:'Giraffe'},
-      {ja:'カバ',           en:'Hippopotamus'},
-      {ja:'コビトカバ',     en:'Pygmy hippopotamus'},
-      {ja:'ヒガシクロサイ', en:'Eastern black rhinoceros'}],
-    noteJa:'世界三大珍獣のひとつとされるコビトカバに会えます。',
-    noteEn:'Includes the pygmy hippopotamus, one of the world\u2019s rarest large mammals.' },
+      {ja:'キリン',     en:'Giraffe'},
+      {ja:'カバ',       en:'Hippopotamus'},
+      {ja:'コビトカバ', en:'Pygmy hippopotamus'},
+      {ja:'サイ',       en:'Rhinoceros'}],
+    noteJa:'西園の北側。世界三大珍獣のひとつとされるコビトカバに会えます。',
+    noteEn:'In the north of the West Garden. Includes the pygmy hippopotamus, one of the world’s rarest large mammals.' },
 
-  { id:'aye-aye', x:190, y:872, tier:2, theme:'indoor', zone:'west',
-    ja:'アイアイのすむ森', en:'Aye-aye Forest',
-    animals:[
-      {ja:'アイアイ',                   en:'Aye-aye'},
-      {ja:'クロシロエリマキキツネザル', en:'Black-and-white ruffed lemur'}],
-    noteJa:'マダガスカルの動物を集めた施設。アイアイの繁殖は国内で最初の例です。',
-    noteEn:'A Madagascar-themed house. This zoo was the first in Japan to breed the aye-aye.' },
+  { id:'shoebill', x:385, y:375, tier:2, theme:'water', zone:'west',
+    ja:'ハシビロコウ', en:'Shoebill',
+    animals:[{ja:'ハシビロコウ', en:'Shoebill'}],
+    noteJa:'動かない鳥として知られる、西園の人気者です。',
+    noteEn:'The famously motionless bird — one of the West Garden’s most popular residents.' },
 
-  { id:'small-mammal', x:416, y:886, tier:2, theme:'indoor', zone:'west',
+  { id:'small-mammal', x:591, y:345, tier:2, theme:'indoor', zone:'west',
     ja:'小獣館', en:'Small Mammal House',
     animals:[
       {ja:'ハダカデバネズミ', en:'Naked mole-rat'},
-      {ja:'ミーアキャット',   en:'Meerkat'},
-      {ja:'ハリモグラ',       en:'Short-beaked echidna'}],
+      {ja:'コウモリの仲間',   en:'Bats'}],
     noteJa:'夜行性の小型動物が多く、館内はやや暗めです。全天候型。',
     noteEn:'Dimly lit indoors, with many nocturnal small mammals. Good in any weather.' },
 
-  { id:'vivarium', x:556, y:946, tier:2, theme:'indoor', zone:'west',
+  { id:'red-panda', x:603, y:426, tier:3, theme:'forest', zone:'west',
+    ja:'レッサーパンダ', en:'Red Panda',
+    animals:[{ja:'レッサーパンダ', en:'Red panda'}],
+    noteJa:'小獣館のすぐ南にある展示です。',
+    noteEn:'Just south of the Small Mammal House.' },
+
+  { id:'vivarium', x:254, y:419, tier:2, theme:'indoor', zone:'west',
     ja:'両生爬虫類館', en:'Vivarium',
     animals:[
-      {ja:'イリエワニ',         en:'Saltwater crocodile'},
-      {ja:'オオサンショウウオ', en:'Japanese giant salamander'},
-      {ja:'ミヤコカナヘビ',     en:'Miyako grass lizard'},
-      {ja:'アジアアロワナ',     en:'Asian arowana'}],
-    noteJa:'熱帯雨林をイメージした屋内施設。魚類・両生類・爬虫類を展示しています。',
-    noteEn:'A rainforest-themed indoor hall with fish, amphibians and reptiles.' },
+      {ja:'ワニの仲間',   en:'Crocodilians'},
+      {ja:'ゾウガメ',     en:'Giant tortoise'},
+      {ja:'オオサンショウウオ', en:'Japanese giant salamander'}],
+    noteJa:'西園の西側、不忍通り寄りにある屋内施設。魚類・両生類・爬虫類を展示しています。',
+    noteEn:'An indoor hall on the west side of the West Garden with fish, amphibians and reptiles.' },
 
-  { id:'childrens-zoo', x:320, y:1072, tier:2, theme:'savanna', zone:'west',
-    ja:'子ども動物園すてっぷ', en:'Children\u2019s Zoo "Step"',
+  { id:'flamingo-penguin', x:385, y:454, tier:3, theme:'water', zone:'west',
+    ja:'フラミンゴ・ペンギン', en:'Flamingos & Penguins',
     animals:[
-      {ja:'モルモット', en:'Guinea pig'},
-      {ja:'ヤギ',       en:'Goat'},
-      {ja:'ヒツジ',     en:'Sheep'},
-      {ja:'ニワトリ',   en:'Chicken'}],
-    noteJa:'家畜を中心に、体の仕組みや暮らしを近くで学べるエリアです。',
-    noteEn:'A close-up area focused on domestic animals and how they live.' },
+      {ja:'ベニイロフラミンゴ', en:'American flamingo'},
+      {ja:'フンボルトペンギン', en:'Humboldt penguin'}],
+    noteJa:'不忍池の北側に並ぶ、水辺の鳥の展示です。',
+    noteEn:'Waterbird exhibits lined up on the north side of Shinobazu Pond.' },
 
-  { id:'shinobazu', x:592, y:1088, tier:2, theme:'water', zone:'west',
+  { id:'peccary', x:472, y:449, tier:3, theme:'savanna', zone:'west',
+    ja:'クビワペッカリー', en:'Collared Peccary',
+    animals:[{ja:'クビワペッカリー', en:'Collared peccary'}],
+    noteJa:'西園の中央付近にある展示です。',
+    noteEn:'Near the middle of the West Garden.' },
+
+  { id:'aye-aye', x:186, y:529, tier:2, theme:'indoor', zone:'west',
+    ja:'アイアイのすむ森', en:'Aye-aye Forest',
+    animals:[
+      {ja:'アイアイ',               en:'Aye-aye'},
+      {ja:'ワオキツネザル',         en:'Ring-tailed lemur'},
+      {ja:'エリマキキツネザル',     en:'Ruffed lemur'}],
+    noteJa:'不忍池の北西岸にある、マダガスカルの動物を集めた施設です。',
+    noteEn:'A Madagascar-themed house on the north-west shore of Shinobazu Pond.' },
+
+  { id:'panda-forest', x:551, y:534, tier:1, theme:'forest', zone:'west',
+    ja:'パンダのもり', en:'Panda Forest', animals:[],
+    noteJa:'いそっぷ橋の近く。2026年1月に「シャオシャオ」「レイレイ」が中国へ返還され、現在ジャイアントパンダの展示はありません。',
+    noteEn:'Near Aesop Bridge. Xiao Xiao and Lei Lei were returned to China in January 2026, so no giant pandas are on display at present.' },
+
+  { id:'shinobazu', x:344, y:836, tier:1, theme:'water', zone:'west',
     ja:'不忍池', en:'Shinobazu Pond',
     animals:[
-      {ja:'カワウ',     en:'Great cormorant'},
-      {ja:'カイツブリ', en:'Little grebe'}],
-    noteJa:'ハスが茂る池。園内からは野生の水鳥も観察できます。',
-    noteEn:'A lotus-covered pond where wild waterbirds can also be seen from inside the zoo.' },
+      {ja:'コウノトリ',     en:'Oriental stork'},
+      {ja:'シジュウカラガン', en:'Cackling goose'}],
+    noteJa:'西園の南半分を占める池です。岸辺で水鳥を観察できます。',
+    noteEn:'The pond that fills the southern half of the West Garden, with waterbirds along its shores.' },
 
-  { id:'benten-gate', x:749, y:943, tier:1, theme:'gate', zone:'west',
+  { id:'childrens-zoo', x:568, y:869, tier:2, theme:'savanna', zone:'west',
+    ja:'子ども動物園すてっぷ', en:'Children’s Zoo "Step"',
+    animals:[
+      {ja:'ウサギ',     en:'Rabbit'},
+      {ja:'モルモット', en:'Guinea pig'},
+      {ja:'ウマ',       en:'Horse'}],
+    noteJa:'不忍池の東岸、動物園通り沿いにある、身近な動物とふれあえるエリアです。',
+    noteEn:'On the east shore of Shinobazu Pond along Dobutsuen-dori, a close-up area with familiar animals.' },
+
+  { id:'benten-gate', x:354, y:1092, tier:1, theme:'gate', zone:'west',
     ja:'弁天門', en:'Benten Gate', animals:[],
-    noteJa:'京成上野駅・御徒町駅から近い入口です。',
-    noteEn:'The entrance closest to Keisei-Ueno and Okachimachi stations.' },
-
-  { id:'ikenohata-gate', x:101, y:977, tier:1, theme:'gate', zone:'west',
-    ja:'池之端門', en:'Ikenohata Gate', animals:[],
-    noteJa:'不忍池の西側、池之端方面からの入口です。',
-    noteEn:'The entrance on the west side of Shinobazu Pond, from the Ikenohata area.' }
+    noteJa:'西園の南端にある入口です。京成上野駅・JR上野駅不忍口から近い入口です。',
+    noteEn:'The entrance at the south end of the West Garden, closest to Keisei-Ueno Station and the Shinobazu Exit of JR Ueno Station.' }
 ];
 
 /* ==================================================================
@@ -474,11 +497,14 @@ const I18N = {
        east:'東園', west:'西園', both:'東園 ⇄ 西園',
        none:'動物の展示はありません',
        locating:'現在地を取得しています…',
-       outside:'現在地は園外のようです', nearest:'最寄り：',
+       nearest:'最寄り：', zoo:'上野動物園',
+       near:(place, d) => `上野動物園の外にいます。${place}まで約${d}`,
+       far:d => `上野動物園から約${d}離れています。園内に着いたら右下の現在地ボタンを押してください。`,
        accuracy:'精度 約', m:'m',
        errPerm:'位置情報の利用が許可されていません。ブラウザの設定をご確認ください。',
        errPos:'現在地を取得できませんでした。電波状況の良い場所でお試しください。',
-       errTime:'現在地の取得がタイムアウトしました。',
+       errTime:'現在地を取得できませんでした（タイムアウト）。端末の位置情報サービスがオンか確認のうえ、右下の現在地ボタンで再試行してください。',
+       errInsecure:'位置情報は https:// または localhost で開いたときだけ利用できます。',
        errSupport:'このブラウザは位置情報に対応していません。' },
   en:{ title:'Ueno Zoo Map', search:'Search by animal (e.g. tiger)',
        lg1:'Forest', lg2:'Grassland & savanna', lg3:'Water & polar',
@@ -486,11 +512,14 @@ const I18N = {
        east:'East Garden', west:'West Garden', both:'East ⇄ West',
        none:'No animals on display',
        locating:'Finding your location…',
-       outside:'You appear to be outside the zoo', nearest:'Nearest: ',
+       nearest:'Nearest: ', zoo:'Ueno Zoo',
+       near:(place, d) => `You are outside Ueno Zoo. ${place} is about ${d} away.`,
+       far:d => `You are about ${d} from Ueno Zoo. Tap the locate button once you arrive.`,
        accuracy:'Accuracy approx. ', m:'m',
        errPerm:'Location access is blocked. Please check your browser settings.',
        errPos:'Could not get your location. Try again where the signal is better.',
-       errTime:'Timed out while getting your location.',
+       errTime:'Timed out while getting your location. Check that location services are on, then tap the locate button to try again.',
+       errInsecure:'Location is only available when this page is opened over https:// or on localhost.',
        errSupport:'This browser does not support geolocation.' }
 };
 
@@ -514,7 +543,7 @@ const bounds = L.latLngBounds([0, 0], [IMG_H, IMG_W]);
 L.imageOverlay(MAP_IMAGE, bounds).addTo(map);
 map.setMaxBounds(bounds.pad(0.25));
 // 初期表示は全体ではなく、ラベルが読める程度に寄せておく
-map.setView(px(1000, 560), -1);
+map.setView(px(800, 600), -1);
 
 /* ------------------------- ラベル ------------------------- */
 const labelLayer = L.layerGroup().addTo(map);
@@ -659,7 +688,7 @@ document.getElementById('fit-btn').addEventListener('click', () => {
 /* ------------------------- GPS ------------------------- */
 const statusEl = document.getElementById('gps-status');
 statusEl.addEventListener('click', () => statusEl.classList.remove('on'));
-let gpsMarker = null, lastFix = null, hasCentered = false, lastErrCode = null;
+let gpsMarker = null, lastFix = null, hasCentered = false, lastErr = null, watchId = null;
 
 const gpsIcon = L.divIcon({
   className:'',
@@ -668,10 +697,14 @@ const gpsIcon = L.divIcon({
 });
 
 function gpsToPixel(lat, lng){
-  const [p0, p1] = CALIBRATION;
+  // 基準点 p, q, r の緯度経度空間での重み (u, v) を求め、同じ重みを画像座標に適用する
+  const [p, q, r] = CALIBRATION;
+  const det = (q.lng - p.lng) * (r.lat - p.lat) - (r.lng - p.lng) * (q.lat - p.lat);
+  const u = ((lng - p.lng) * (r.lat - p.lat) - (r.lng - p.lng) * (lat - p.lat)) / det;
+  const v = ((q.lng - p.lng) * (lat - p.lat) - (lng - p.lng) * (q.lat - p.lat)) / det;
   return {
-    x: p0.x + (lng - p0.lng) / (p1.lng - p0.lng) * (p1.x - p0.x),
-    y: p0.y + (lat - p0.lat) / (p1.lat - p0.lat) * (p1.y - p0.y)
+    x: p.x + u * (q.x - p.x) + v * (r.x - p.x),
+    y: p.y + u * (q.y - p.y) + v * (r.y - p.y)
   };
 }
 function nearestArea(x, y){
@@ -682,57 +715,111 @@ function nearestArea(x, y){
   });
   return best;
 }
+function distanceM(a, b){
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2
+          + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function nearestGate(here){
+  let best = null;
+  CALIBRATION.forEach(c => {
+    const area = AREAS.find(a => a.id === c.id && a.theme === 'gate');
+    if (!area) return;
+    const dist = distanceM(here, c);
+    if (!best || dist < best.dist) best = { area, dist };
+  });
+  return best;
+}
+function fmtDist(m){
+  if (m < 1000) return `${Math.max(10, Math.round(m / 10) * 10)}m`;
+  if (m < 10000) return `${(m / 1000).toFixed(1)}km`;
+  return `${Math.round(m / 1000).toLocaleString()}km`;
+}
 function updateGpsText(){
   const t = I18N[lang];
-  if (lastErrCode !== null){
-    statusEl.textContent = { 1:t.errPerm, 2:t.errPos, 3:t.errTime }[lastErrCode] || t.errPos;
+  if (lastErr){
+    statusEl.textContent = t[lastErr];
     return;
   }
   if (!lastFix) return;
-  const { x, y, accuracy } = lastFix;
-  const inside = x > -150 && x < IMG_W + 150 && y > -150 && y < IMG_H + 150;
-  const area = nearestArea(x, y);
-  const name = lang === 'ja' ? area.ja : area.en;
-  statusEl.textContent = inside
-    ? `${t.nearest}${name}　/　${t.accuracy}${Math.round(accuracy)}${t.m}`
-    : `${t.outside}　/　${t.nearest}${name}`;
+  const name = a => lang === 'ja' ? a.ja : a.en;
+  const { x, y, accuracy, zone, dist, gate } = lastFix;
+  if (zone === 'inside'){
+    statusEl.textContent =
+      `${t.nearest}${name(nearestArea(x, y))}　/　${t.accuracy}${Math.round(accuracy)}${t.m}`;
+  } else if (zone === 'near'){
+    statusEl.textContent = gate
+      ? t.near(name(gate.area), fmtDist(gate.dist))
+      : t.near(t.zoo, fmtDist(dist));
+  } else {
+    statusEl.textContent = t.far(fmtDist(dist));
+  }
   statusEl.classList.add('on');
 }
 function onPosition(pos){
   const { latitude:lat, longitude:lng, accuracy } = pos.coords;
+  const here = { lat, lng };
   const { x, y } = gpsToPixel(lat, lng);
-  lastFix = { x, y, accuracy: accuracy || 20 };
-  lastErrCode = null;
-  const ll = px(x, y);
-  if (!gpsMarker){
-    gpsMarker = L.marker(ll, { icon:gpsIcon, interactive:false, zIndexOffset:1000 }).addTo(map);
+  const dist = distanceM(here, ZOO_CENTER);
+  const onMap = x >= 0 && x <= IMG_W && y >= 0 && y <= IMG_H;
+  const zone = dist > FAR_M ? 'far' : onMap ? 'inside' : 'near';
+  lastFix = { x, y, accuracy: accuracy || 20, zone, dist,
+              gate: zone === 'near' ? nearestGate(here) : null };
+  lastErr = null;
+
+  if (zone === 'inside'){
+    const ll = px(x, y);
+    if (!gpsMarker){
+      gpsMarker = L.marker(ll, { icon:gpsIcon, interactive:false, zIndexOffset:1000 }).addTo(map);
+    } else {
+      gpsMarker.setLatLng(ll);
+    }
+    if (!hasCentered){ map.setView(ll, 0); hasCentered = true; }
   } else {
-    gpsMarker.setLatLng(ll);
+    // 地図の外にいるときはマーカーを置かず、地図も動かさない
+    if (gpsMarker){ gpsMarker.remove(); gpsMarker = null; }
+    hasCentered = false;
+    if (zone === 'far') stopGps();
   }
-  if (!hasCentered){ map.setView(ll, 0); hasCentered = true; }
   updateGpsText();
+}
+function showGpsError(key){
+  lastErr = key;
+  updateGpsText();
+  statusEl.classList.add('on');
 }
 function onGpsError(err){
-  lastErrCode = err.code;
-  updateGpsText();
-  statusEl.classList.add('on');
+  if (err.code === err.PERMISSION_DENIED){ stopGps(); showGpsError('errPerm'); return; }
+  // 一度取得できた後の一時的な失敗（静止中のタイムアウト等）では、直前の位置を表示し続ける
+  if (lastFix) return;
+  showGpsError(err.code === err.TIMEOUT ? 'errTime' : 'errPos');
 }
-function startGps(){
-  const t = I18N[lang];
-  if (!('geolocation' in navigator)){
-    statusEl.textContent = t.errSupport;
-    statusEl.classList.add('on');
-    return;
-  }
-  statusEl.textContent = t.locating;
+function stopGps(){
+  if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+}
+// fresh … 現在地ボタンからの再開時は、移動前のキャッシュ位置を使わずに取り直す
+function startGps(fresh = false){
+  stopGps();
+  lastErr = null;
+  lastFix = null;
+  if (!window.isSecureContext){ showGpsError('errInsecure'); return; }
+  if (!('geolocation' in navigator)){ showGpsError('errSupport'); return; }
+  statusEl.textContent = I18N[lang].locating;
   statusEl.classList.add('on');
-  navigator.geolocation.watchPosition(onPosition, onGpsError, {
-    enableHighAccuracy:true, maximumAge:2000, timeout:15000
+  // 屋内やGPSのない端末では高精度測位に時間がかかるため、まず低精度で素早く位置を得て、並行して高精度で追従する
+  navigator.geolocation.getCurrentPosition(
+    pos => { if (!lastFix) onPosition(pos); },
+    onGpsError,
+    { enableHighAccuracy:false, maximumAge: fresh ? 0 : 600000, timeout:20000 });
+  watchId = navigator.geolocation.watchPosition(onPosition, onGpsError, {
+    enableHighAccuracy:true, maximumAge: fresh ? 0 : 5000, timeout:30000
   });
 }
 document.getElementById('locate-btn').addEventListener('click', () => {
   if (gpsMarker) map.setView(gpsMarker.getLatLng(), Math.max(map.getZoom(), 0));
-  else { hasCentered = false; startGps(); }
+  else { hasCentered = false; startGps(true); }
 });
 
 /* ------------------------- 起動 ------------------------- */
